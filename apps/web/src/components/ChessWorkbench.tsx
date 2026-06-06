@@ -66,10 +66,6 @@ type UploadResponse = {
   };
 };
 
-const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-).replace(/\/$/, "");
-
 const ranks = [8, 7, 6, 5, 4, 3, 2, 1];
 const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
 
@@ -124,7 +120,7 @@ export function ChessWorkbench() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch(`${API_URL}/games/upload`, {
+      const response = await fetch("/api/games/upload", {
         method: "POST",
         body: formData,
       });
