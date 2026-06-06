@@ -232,10 +232,9 @@ def _load_opening_book() -> dict[str, Opening]:
 
 def _opening_files() -> list[Path]:
     app_dir = Path(__file__).resolve().parent
-    repo_root = Path(__file__).resolve().parents[3]
     candidates = [
         app_dir / "data" / "openings",
-        repo_root / "chess-openings",
+        _repo_root() / "chess-openings",
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -449,7 +448,7 @@ def _find_stockfish_path() -> str | None:
     if env_path and Path(env_path).exists():
         return env_path
 
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = _repo_root()
     candidates = [
         Path("/usr/games/stockfish"),
         Path("/usr/bin/stockfish"),
@@ -462,6 +461,16 @@ def _find_stockfish_path() -> str | None:
         if candidate.exists():
             return str(candidate)
     return None
+
+
+def _repo_root() -> Path:
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "chess-openings").exists() or (parent / "Stockfish").exists():
+            return parent
+        if (parent / "apps" / "api").exists():
+            return parent
+    return current.parent
 
 
 def _stockfish_message() -> str:
