@@ -1,6 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { ChangeEvent, useMemo, useState } from "react";
+import { ChessBoard } from "@/components/ChessBoard";
+import { initialBoard } from "@/components/chessCore";
 
 type Opening = {
   eco: string;
@@ -66,24 +69,6 @@ type UploadResponse = {
   };
 };
 
-const ranks = [8, 7, 6, 5, 4, 3, 2, 1];
-const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
-
-const pieceGlyphs: Record<string, string> = {
-  K: "♔",
-  Q: "♕",
-  R: "♖",
-  B: "♗",
-  N: "♘",
-  P: "♙",
-  k: "♚",
-  q: "♛",
-  r: "♜",
-  b: "♝",
-  n: "♞",
-  p: "♟",
-};
-
 export function ChessWorkbench() {
   const [file, setFile] = useState<File | null>(null);
   const [upload, setUpload] = useState<UploadResponse | null>(null);
@@ -91,7 +76,6 @@ export function ChessWorkbench() {
   const [selectedPly, setSelectedPly] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isReportOpen, setIsReportOpen] = useState(true);
 
   const selectedGame = upload?.games[selectedGameIndex] ?? null;
   const selectedPosition = selectedGame?.positions[selectedPly] ?? null;
@@ -134,7 +118,6 @@ export function ChessWorkbench() {
       setUpload(payload);
       setSelectedGameIndex(0);
       setSelectedPly(0);
-      setIsReportOpen(true);
     } catch (uploadError) {
       setError(
         uploadError instanceof Error
@@ -149,13 +132,13 @@ export function ChessWorkbench() {
   function selectGame(index: number) {
     setSelectedGameIndex(index);
     setSelectedPly(0);
-    setIsReportOpen(true);
   }
 
   function goToPly(ply: number) {
     if (!selectedGame) {
       return;
     }
+
     const boundedPly = Math.min(
       Math.max(ply, 0),
       selectedGame.positions.length - 1,
@@ -164,285 +147,329 @@ export function ChessWorkbench() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f5f0] text-stone-950">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-4 border-b border-stone-300 pb-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-emerald-800">
-              Chess Analytics
-            </p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-normal text-stone-950 sm:text-4xl">
-              Game Review
-            </h1>
-          </div>
+    <main className="min-h-screen bg-[#302e2b] text-[#f5f0df]">
+      <div className="grid min-h-screen lg:grid-cols-[86px_minmax(620px,1fr)_440px]">
+        <ReviewRail />
 
-          <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
-            <label className="flex min-h-11 flex-1 cursor-pointer items-center justify-center border border-stone-400 bg-white px-4 text-sm font-semibold text-stone-900 transition hover:bg-stone-100 lg:w-72">
-              <input
-                type="file"
-                accept=".pgn"
-                onChange={handleFileChange}
-                className="sr-only"
-              />
-              <span className="truncate">
-                {file ? file.name : "Choose PGN"}
-              </span>
-            </label>
-            <button
-              type="button"
-              onClick={handleUpload}
-              disabled={isUploading}
-              className="min-h-11 border border-emerald-950 bg-emerald-950 px-5 text-sm font-semibold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:border-stone-400 disabled:bg-stone-500"
-            >
-              {isUploading ? "Analyzing" : "Upload"}
-            </button>
-          </div>
-        </header>
-
-        {error ? (
-          <div className="border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
-            {error}
-          </div>
-        ) : null}
-
-        <section className="grid flex-1 gap-5 lg:grid-cols-[280px_minmax(0,1fr)_340px]">
-          <aside className="min-h-0 border border-stone-300 bg-white">
-            <div className="border-b border-stone-300 px-4 py-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-700">
-                Games
-              </h2>
+        <section className="flex min-h-screen flex-col px-4 py-5 sm:px-6 lg:px-8">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-sm font-bold uppercase text-[#9acc5b]">
+                Chess Analytics
+              </p>
+              <h1 className="text-3xl font-bold tracking-normal">Game Review</h1>
             </div>
-            <div className="max-h-[280px] overflow-auto p-2 lg:max-h-[calc(100vh-210px)]">
-              {upload ? (
-                <div className="space-y-2">
-                  {upload.games.map((game, index) => (
-                    <button
-                      type="button"
-                      key={game.id}
-                      onClick={() => selectGame(index)}
-                      className={`w-full border px-3 py-3 text-left transition ${
-                        selectedGameIndex === index
-                          ? "border-emerald-800 bg-emerald-50"
-                          : "border-stone-200 bg-white hover:bg-stone-50"
-                      }`}
-                    >
-                      <span className="block truncate text-sm font-semibold text-stone-950">
-                        {game.title}
-                      </span>
-                      <span className="mt-1 block truncate text-xs text-stone-600">
-                        {game.opening
-                          ? `${game.opening.eco} ${game.opening.name}`
-                          : "Opening unknown"}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState label="No games loaded" />
-              )}
-            </div>
-          </aside>
-
-          <section className="min-w-0 border border-stone-300 bg-white">
-            <div className="flex flex-col gap-3 border-b border-stone-300 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <h2 className="truncate text-lg font-semibold text-stone-950">
-                  {selectedGame?.title ?? "PGN Review"}
-                </h2>
-                <p className="truncate text-sm text-stone-600">
-                  {selectedOpening
-                    ? `${selectedOpening.eco} ${selectedOpening.name}`
-                    : "Opening will appear after upload"}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => goToPly(0)}
-                  disabled={!selectedGame || selectedPly === 0}
-                  className="h-9 w-10 border border-stone-300 bg-white text-sm font-semibold disabled:opacity-40"
-                  aria-label="Go to first move"
-                >
-                  {"<<"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goToPly(selectedPly - 1)}
-                  disabled={!selectedGame || selectedPly === 0}
-                  className="h-9 w-10 border border-stone-300 bg-white text-sm font-semibold disabled:opacity-40"
-                  aria-label="Go back one move"
-                >
-                  {"<"}
-                </button>
-                <span className="flex h-9 min-w-20 items-center justify-center border border-stone-300 bg-stone-50 px-3 text-sm font-semibold tabular-nums">
-                  {selectedPly}
-                  {selectedGame ? `/${selectedGame.moves.length}` : "/0"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => goToPly(selectedPly + 1)}
-                  disabled={
-                    !selectedGame || selectedPly >= selectedGame.moves.length
-                  }
-                  className="h-9 w-10 border border-stone-300 bg-white text-sm font-semibold disabled:opacity-40"
-                  aria-label="Go forward one move"
-                >
-                  {">"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => goToPly(selectedGame?.moves.length ?? 0)}
-                  disabled={
-                    !selectedGame || selectedPly >= selectedGame.moves.length
-                  }
-                  className="h-9 w-10 border border-stone-300 bg-white text-sm font-semibold disabled:opacity-40"
-                  aria-label="Go to final move"
-                >
-                  {">>"}
-                </button>
-              </div>
-            </div>
-
-            <div className="grid gap-5 p-4 xl:grid-cols-[minmax(320px,560px)_minmax(260px,1fr)]">
-              <div className="mx-auto w-full max-w-xl">
-                <ChessBoard position={selectedPosition} />
-                <PositionStrip position={selectedPosition} />
-              </div>
-
-              <div className="min-w-0">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-700">
-                    Moves
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setIsReportOpen((open) => !open)}
-                    disabled={!selectedGame}
-                    className="h-9 border border-stone-300 bg-stone-950 px-3 text-sm font-semibold text-white disabled:opacity-40"
-                  >
-                    {isReportOpen ? "Hide Report" : "Report"}
-                  </button>
-                </div>
-
-                <div className="max-h-[300px] overflow-auto border border-stone-200 bg-stone-50 p-2 xl:max-h-[480px]">
-                  {selectedGame ? (
-                    <MoveList
-                      movePairs={movePairs}
-                      selectedPly={selectedPly}
-                      onSelectPly={goToPly}
-                    />
-                  ) : (
-                    <EmptyState label="No moves loaded" />
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <aside
-            className={`border border-stone-300 bg-white ${
-              isReportOpen ? "block" : "hidden lg:block"
-            }`}
-          >
-            <div className="flex items-center justify-between border-b border-stone-300 px-4 py-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-stone-700">
-                Report
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsReportOpen(false)}
-                className="h-8 w-8 border border-stone-300 bg-white text-sm font-semibold lg:hidden"
-                aria-label="Close report"
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Link
+                href="/learn-openings"
+                className="flex min-h-11 items-center justify-center bg-[#4b4843] px-4 text-sm font-bold text-[#efe7d2] hover:bg-[#5a554d] lg:hidden"
               >
-                x
-              </button>
+                Learn Openings
+              </Link>
+              <UploadControls
+                file={file}
+                isUploading={isUploading}
+                onFileChange={handleFileChange}
+                onUpload={handleUpload}
+              />
             </div>
-            <ReportPanel game={selectedGame} engineMessage={upload?.engine.message} />
-          </aside>
+          </div>
+
+          {error ? (
+            <div className="mb-4 border border-[#d64b4b] bg-[#4a2928] px-4 py-3 text-sm font-bold text-[#ffd5d5]">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="mx-auto flex w-full max-w-[820px] flex-1 flex-col justify-center">
+            <PlayerBar
+              name={selectedGame?.headers.Black ?? "Black"}
+              detail={selectedOpening?.name ?? "Upload a PGN to start"}
+              clock={selectedGame ? "Review" : "--:--"}
+              top
+            />
+            <ChessBoard
+              board={selectedPosition?.board ?? initialBoard}
+              lastMove={selectedPosition?.lastMove?.uci}
+            />
+            <PlayerBar
+              name={selectedGame?.headers.White ?? "White"}
+              detail={selectedGame?.result ?? "PGN analysis"}
+              clock={selectedGame ? `${selectedPly}/${selectedGame.moves.length}` : "0/0"}
+            />
+          </div>
         </section>
+
+        <AnalysisPanel
+          upload={upload}
+          selectedGame={selectedGame}
+          selectedGameIndex={selectedGameIndex}
+          selectedPly={selectedPly}
+          selectedOpening={selectedOpening}
+          movePairs={movePairs}
+          onSelectGame={selectGame}
+          onSelectPly={goToPly}
+        />
       </div>
     </main>
   );
 }
 
-function ChessBoard({ position }: { position: Position | null }) {
-  const lastMoveSquares = new Set(
-    position?.lastMove
-      ? [position.lastMove.from, position.lastMove.to]
-      : [],
-  );
-
+function ReviewRail() {
   return (
-    <div className="aspect-square w-full border border-stone-900 bg-stone-900">
-      <div className="grid h-full w-full grid-cols-8 grid-rows-8">
-        {ranks.flatMap((rank, rankIndex) =>
-          files.map((fileName, fileIndex) => {
-            const square = `${fileName}${rank}`;
-            const piece = position?.board[square];
-            const isDark = (rankIndex + fileIndex) % 2 === 1;
-            const isLastMove = lastMoveSquares.has(square);
+    <nav className="hidden min-h-screen flex-col items-center gap-3 bg-[#242321] px-3 py-5 lg:flex">
+      <div className="mb-4 flex h-11 w-11 items-center justify-center rounded bg-[#7fa650] text-xl font-black text-white">
+        CA
+      </div>
+      <RailLink href="/upload" label="Review" active icon="A" />
+      <RailLink href="/learn-openings" label="Learn" icon="L" />
+    </nav>
+  );
+}
 
-            return (
-              <div
-                key={square}
-                className={`relative flex items-center justify-center ${
-                  isDark ? "bg-[#779556]" : "bg-[#ebecd0]"
-                } ${isLastMove ? "ring-4 ring-inset ring-amber-400" : ""}`}
-                aria-label={square}
-              >
-                <span className="select-none text-[clamp(1.8rem,7vw,4.5rem)] leading-none text-stone-950 drop-shadow-sm">
-                  {piece ? pieceGlyphs[piece] : ""}
-                </span>
-                <span className="absolute left-1 top-1 text-[10px] font-bold text-stone-800/70">
-                  {fileIndex === 0 ? rank : ""}
-                </span>
-                <span className="absolute bottom-1 right-1 text-[10px] font-bold text-stone-800/70">
-                  {rankIndex === 7 ? fileName : ""}
-                </span>
-              </div>
-            );
-          }),
-        )}
+function RailLink({
+  href,
+  label,
+  active = false,
+  icon,
+}: {
+  href: string;
+  label: string;
+  active?: boolean;
+  icon: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`flex w-full flex-col items-center gap-1 rounded px-2 py-3 text-xs font-bold transition ${
+        active ? "bg-[#3f3d39] text-[#9acc5b]" : "text-[#b8b2a7] hover:bg-[#302e2b]"
+      }`}
+    >
+      <span className="flex h-7 w-7 items-center justify-center rounded bg-black/20 text-sm">
+        {icon}
+      </span>
+      {label}
+    </Link>
+  );
+}
+
+function UploadControls({
+  file,
+  isUploading,
+  onFileChange,
+  onUpload,
+}: {
+  file: File | null;
+  isUploading: boolean;
+  onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  onUpload: () => void;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+      <label className="flex min-h-11 w-full cursor-pointer items-center justify-center bg-[#262421] px-4 text-sm font-bold text-[#efe7d2] ring-1 ring-white/10 hover:bg-[#3a3733] sm:w-72">
+        <input
+          type="file"
+          accept=".pgn"
+          onChange={onFileChange}
+          className="sr-only"
+        />
+        <span className="truncate">{file ? file.name : "Choose PGN"}</span>
+      </label>
+      <button
+        type="button"
+        onClick={onUpload}
+        disabled={isUploading}
+        className="min-h-11 bg-[#7fa650] px-6 text-sm font-bold text-white hover:bg-[#8fba59] disabled:cursor-not-allowed disabled:bg-[#4b4843] disabled:text-[#918b82]"
+      >
+        {isUploading ? "Analyzing" : "Upload"}
+      </button>
+    </div>
+  );
+}
+
+function PlayerBar({
+  name,
+  detail,
+  clock,
+  top = false,
+}: {
+  name: string;
+  detail: string;
+  clock: string;
+  top?: boolean;
+}) {
+  return (
+    <div className={`flex items-center justify-between bg-[#403d39] px-3 py-2 ${top ? "rounded-t" : "rounded-b"}`}>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="h-9 w-9 shrink-0 rounded bg-[#d8d2c3]" />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold text-white">{name}</p>
+          <p className="truncate text-xs text-[#b8b2a7]">{detail}</p>
+        </div>
+      </div>
+      <div className="rounded bg-[#262421] px-4 py-2 text-lg font-bold text-[#efe7d2]">
+        {clock}
       </div>
     </div>
   );
 }
 
-function PositionStrip({ position }: { position: Position | null }) {
-  if (!position) {
-    return (
-      <div className="mt-3 grid grid-cols-3 border border-stone-300 bg-stone-50 text-center text-sm">
-        <Metric label="Turn" value="-" />
-        <Metric label="Material" value="0" />
-        <Metric label="Status" value="Ready" />
+function AnalysisPanel({
+  upload,
+  selectedGame,
+  selectedGameIndex,
+  selectedPly,
+  selectedOpening,
+  movePairs,
+  onSelectGame,
+  onSelectPly,
+}: {
+  upload: UploadResponse | null;
+  selectedGame: ParsedGame | null;
+  selectedGameIndex: number;
+  selectedPly: number;
+  selectedOpening: Opening | null;
+  movePairs: Array<{ moveNumber: number; white: Move | null; black: Move | null }>;
+  onSelectGame: (index: number) => void;
+  onSelectPly: (ply: number) => void;
+}) {
+  return (
+    <aside className="min-h-screen bg-[#262421] text-[#d6d1c7]">
+      <div className="border-b border-white/10 p-4">
+        <div className="grid grid-cols-4 gap-1 text-center text-xs font-bold text-[#a5a096]">
+          <span className="border-b-2 border-[#7fa650] pb-3 text-white">Analysis</span>
+          <Link href="/learn-openings" className="pb-3 hover:text-white">
+            Openings
+          </Link>
+          <span className="pb-3">Games</span>
+          <span className="pb-3">Report</span>
+        </div>
       </div>
-    );
+
+      <div className="max-h-[calc(100vh-76px)] overflow-auto p-4">
+        <section className="rounded bg-[#312e2b] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase text-[#9acc5b]">
+                {selectedOpening?.eco ?? "PGN"}
+              </p>
+              <h2 className="truncate text-lg font-bold text-white">
+                {selectedOpening?.name ?? "Upload a game"}
+              </h2>
+            </div>
+            <span className="rounded bg-black/25 px-2 py-1 text-xs font-bold">
+              Stockfish
+            </span>
+          </div>
+
+          <div className="mt-4 grid grid-cols-5 gap-2">
+            <ControlButton onClick={() => onSelectPly(0)} disabled={!selectedGame || selectedPly === 0}>
+              {"|<"}
+            </ControlButton>
+            <ControlButton onClick={() => onSelectPly(selectedPly - 1)} disabled={!selectedGame || selectedPly === 0}>
+              {"<"}
+            </ControlButton>
+            <div className="flex items-center justify-center bg-[#403d39] text-sm font-bold text-white">
+              {selectedGame ? `${selectedPly}/${selectedGame.moves.length}` : "0/0"}
+            </div>
+            <ControlButton
+              onClick={() => onSelectPly(selectedPly + 1)}
+              disabled={!selectedGame || selectedPly >= selectedGame.moves.length}
+            >
+              {">"}
+            </ControlButton>
+            <ControlButton
+              onClick={() => onSelectPly(selectedGame?.moves.length ?? 0)}
+              disabled={!selectedGame || selectedPly >= (selectedGame?.moves.length ?? 0)}
+            >
+              {">|"}
+            </ControlButton>
+          </div>
+        </section>
+
+        <section className="mt-4 rounded bg-[#312e2b] p-4">
+          <h3 className="text-sm font-bold uppercase text-[#efe7d2]">Games</h3>
+          <GameList
+            upload={upload}
+            selectedGameIndex={selectedGameIndex}
+            onSelectGame={onSelectGame}
+          />
+        </section>
+
+        <section className="mt-4 rounded bg-[#312e2b] p-4">
+          <h3 className="text-sm font-bold uppercase text-[#efe7d2]">Moves</h3>
+          <div className="mt-3 max-h-64 overflow-auto">
+            {selectedGame ? (
+              <MoveList
+                movePairs={movePairs}
+                selectedPly={selectedPly}
+                onSelectPly={onSelectPly}
+              />
+            ) : (
+              <EmptyState label="No moves loaded" />
+            )}
+          </div>
+        </section>
+
+        <ReportPanel game={selectedGame} engineMessage={upload?.engine.message} />
+      </div>
+    </aside>
+  );
+}
+
+function ControlButton({
+  children,
+  disabled,
+  onClick,
+}: {
+  children: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="h-10 bg-[#403d39] text-sm font-bold text-white hover:bg-[#4b4843] disabled:cursor-not-allowed disabled:text-[#77716a]"
+    >
+      {children}
+    </button>
+  );
+}
+
+function GameList({
+  upload,
+  selectedGameIndex,
+  onSelectGame,
+}: {
+  upload: UploadResponse | null;
+  selectedGameIndex: number;
+  onSelectGame: (index: number) => void;
+}) {
+  if (!upload) {
+    return <EmptyState label="No games loaded" />;
   }
 
   return (
-    <div className="mt-3 grid grid-cols-3 border border-stone-300 bg-stone-50 text-center text-sm">
-      <Metric label="Turn" value={capitalize(position.turn)} />
-      <Metric
-        label="Material"
-        value={position.materialBalance > 0 ? `+${position.materialBalance}` : `${position.materialBalance}`}
-      />
-      <Metric
-        label="Status"
-        value={
-          position.isCheckmate ? "Mate" : position.isCheck ? "Check" : "Live"
-        }
-      />
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border-r border-stone-300 px-2 py-3 last:border-r-0">
-      <div className="text-xs font-semibold uppercase tracking-wide text-stone-500">
-        {label}
-      </div>
-      <div className="mt-1 truncate font-semibold text-stone-950">{value}</div>
+    <div className="mt-3 space-y-2">
+      {upload.games.map((game, index) => (
+        <button
+          type="button"
+          key={game.id}
+          onClick={() => onSelectGame(index)}
+          className={`w-full rounded p-3 text-left transition ${
+            selectedGameIndex === index
+              ? "bg-[#435d32] text-white"
+              : "bg-[#3a3733] hover:bg-[#4b4843]"
+          }`}
+        >
+          <span className="block truncate text-sm font-bold">{game.title}</span>
+          <span className="mt-1 block truncate text-xs text-[#c9c4b8]">
+            {game.opening ? `${game.opening.eco} ${game.opening.name}` : "Opening unknown"}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -463,7 +490,7 @@ function MoveList({
           key={pair.moveNumber}
           className="grid grid-cols-[42px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-1 text-sm"
         >
-          <div className="px-2 py-2 text-right font-semibold text-stone-500">
+          <div className="px-2 py-2 text-right font-bold text-[#a5a096]">
             {pair.moveNumber}.
           </div>
           <MoveButton
@@ -499,10 +526,10 @@ function MoveButton({
     <button
       type="button"
       onClick={() => onSelectPly(move.ply)}
-      className={`h-9 min-w-0 truncate border px-2 text-left font-medium transition ${
+      className={`h-9 min-w-0 truncate px-2 text-left font-bold transition ${
         selectedPly === move.ply
-          ? "border-emerald-800 bg-emerald-100 text-emerald-950"
-          : "border-transparent bg-white text-stone-900 hover:border-stone-300"
+          ? "bg-[#7fa650] text-white"
+          : "bg-[#3a3733] text-[#efe7d2] hover:bg-[#4b4843]"
       }`}
       title={move.opening ? `${move.opening.eco} ${move.opening.name}` : move.uci}
     >
@@ -519,61 +546,45 @@ function ReportPanel({
   engineMessage?: string;
 }) {
   if (!game) {
-    return <EmptyState label="No report loaded" />;
+    return (
+      <section className="mt-4 rounded bg-[#312e2b] p-4">
+        <h3 className="text-sm font-bold uppercase text-[#efe7d2]">Report</h3>
+        <EmptyState label="No report loaded" />
+      </section>
+    );
   }
 
   return (
-    <div className="max-h-[360px] overflow-auto p-4 lg:max-h-[calc(100vh-210px)]">
-      <div className="space-y-4">
-        <section>
-          <h3 className="text-sm font-semibold text-stone-950">Summary</h3>
-          <ul className="mt-2 space-y-2">
-            {game.report.summary.map((item) => (
-              <li
-                key={item}
-                className="border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800"
-              >
-                {item}
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section>
-          <h3 className="text-sm font-semibold text-stone-950">
-            Struggle Points
-          </h3>
-          <div className="mt-2 space-y-2">
-            {game.report.struggles.map((item) => (
-              <article
-                key={`${item.title}-${item.detail}`}
-                className="border border-stone-200 bg-white px-3 py-3"
-              >
-                <h4 className="text-sm font-semibold text-stone-950">
-                  {item.title}
-                </h4>
-                <p className="mt-1 text-sm leading-6 text-stone-700">
-                  {item.detail}
-                </p>
-              </article>
-            ))}
+    <section className="mt-4 rounded bg-[#312e2b] p-4">
+      <h3 className="text-sm font-bold uppercase text-[#efe7d2]">Game Report</h3>
+      <div className="mt-3 space-y-3">
+        {game.report.summary.map((item) => (
+          <div key={item} className="rounded bg-[#3a3733] px-3 py-2 text-sm text-[#efe7d2]">
+            {item}
           </div>
-        </section>
+        ))}
 
-        <section>
-          <h3 className="text-sm font-semibold text-stone-950">Stockfish</h3>
-          <p className="mt-2 border border-stone-200 bg-stone-50 px-3 py-2 text-sm leading-6 text-stone-700">
+        {game.report.struggles.map((item) => (
+          <article key={`${item.title}-${item.detail}`} className="rounded bg-[#3a3733] p-3">
+            <h4 className="text-sm font-bold text-white">{item.title}</h4>
+            <p className="mt-1 text-sm leading-6 text-[#c9c4b8]">{item.detail}</p>
+          </article>
+        ))}
+
+        <article className="rounded bg-[#3a3733] p-3">
+          <h4 className="text-sm font-bold text-white">Stockfish</h4>
+          <p className="mt-1 text-sm leading-6 text-[#c9c4b8]">
             {engineMessage ?? game.report.stockfish.message}
           </p>
-        </section>
+        </article>
       </div>
-    </div>
+    </section>
   );
 }
 
 function EmptyState({ label }: { label: string }) {
   return (
-    <div className="flex min-h-32 items-center justify-center px-4 py-8 text-center text-sm font-medium text-stone-500">
+    <div className="flex min-h-24 items-center justify-center px-4 py-6 text-center text-sm font-bold text-[#918b82]">
       {label}
     </div>
   );
@@ -593,8 +604,4 @@ function pairMoves(moves: Move[]) {
   }
 
   return pairs;
-}
-
-function capitalize(value: string) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }
