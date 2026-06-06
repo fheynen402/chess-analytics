@@ -11,6 +11,8 @@ import chess.engine
 import chess.pgn
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text, create_engine, func
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 
 app = FastAPI(title="Chess Analytics API")
@@ -31,7 +33,9 @@ app.add_middleware(
 )
 
 
-APP_VERSION = "upload-path-fix-2026-06-06"
+APP_VERSION = "analytics-library-2026-06-06"
+Base = declarative_base()
+SessionLocal: sessionmaker[Session] | None = None
 
 PIECE_VALUES = {
     chess.PAWN: 1,
@@ -59,9 +63,33 @@ class Opening:
         }
 
 
+class ImportedGame(Base):
+    __tablename__ = "imported_games"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    filename = Column(String(255), nullable=False)
+    title = Column(String(500), nullable=False)
+    white = Column(String(255), nullable=True)
+    black = Column(String(255), nullable=True)
+    result = Column(String(20), nullable=True)
+    opening_eco = Column(String(20), nullable=True)
+    opening_name = Column(String(500), nullable=True)
+    first_unbooked_ply = Column(Integer, nullable=True)
+    move_count = Column(Integer, nullable=False, default=0)
+    headers = Column(JSON, nullable=False)
+    report = Column(JSON, nullable=False)
+    pgn_text = Column(Text, nullable=True)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "version": APP_VERSION}
+
+
+@app.get("/analytics/summary")
+def analytics_summary(player_name: str | None = None):
+    return _analytics_summary(player_name)
 
 
 @app.get("/engine/status")
@@ -103,10 +131,13 @@ async def upload_games(file: UploadFile = File(...)):
     if not games:
         raise HTTPException(status_code=400, detail="No chess games were found in that PGN.")
 
+    library = _store_games(filename, text, games)
+
     return {
         "filename": filename,
         "gameCount": len(games),
         "games": games,
+        "library": library,
         "engine": {
             "stockfishAvailable": _find_stockfish_path() is not None,
             "message": _stockfish_message(),
@@ -125,6 +156,253 @@ def _parse_pgn(text: str) -> list[dict[str, Any]]:
         games.append(_game_to_payload(game, len(games) + 1))
 
     return games
+
+
+def _store_games(filename: str, pgn_text: str, games: list[dict[str, Any]]) -> dict[str, Any]:
+    session_factory = _get_session_factory()
+    if session_factory is None:
+        return {
+            "saved": False,
+            "message": "DATABASE_URL is not configured, so this upload was analyzed but not saved.",
+        }
+
+    try:
+        session = session_factory()
+        try:
+            rows = [_imported_game_row(filename, pgn_text, game) for game in games]
+            session.add_all(rows)
+            session.commit()
+            return {
+                "saved": True,
+                "message": f"Saved {len(rows)} game(s) to your analysis library.",
+            }
+        finally:
+            session.close()
+    except Exception as error:
+        return {
+            "saved": False,
+            "message": f"Upload analyzed, but database save failed: {type(error).__name__}: {error}",
+        }
+
+
+def _imported_game_row(filename: str, pgn_text: str, game: dict[str, Any]) -> ImportedGame:
+    opening = game.get("opening") or {}
+    headers = game.get("headers") or {}
+    moves = game.get("moves") or []
+
+    return ImportedGame(
+        filename=filename,
+        title=game.get("title") or filename,
+        white=headers.get("White"),
+        black=headers.get("Black"),
+        result=game.get("result"),
+        opening_eco=opening.get("eco"),
+        opening_name=opening.get("name"),
+        first_unbooked_ply=game.get("firstUnbookedPly"),
+        move_count=(len(moves) + 1) // 2,
+        headers=headers,
+        report=game.get("report") or {},
+        pgn_text=pgn_text,
+    )
+
+
+def _analytics_summary(player_name: str | None = None) -> dict[str, Any]:
+    session_factory = _get_session_factory()
+    if session_factory is None:
+        return {
+            "databaseAvailable": False,
+            "totalGames": 0,
+            "message": "DATABASE_URL is not configured yet.",
+            "advice": [
+                "Connect Railway to your PostgreSQL DATABASE_URL so uploaded PGNs can be remembered across sessions."
+            ],
+            "openings": [],
+            "struggles": [],
+            "recentGames": [],
+        }
+
+    try:
+        session = session_factory()
+        try:
+            rows = (
+                session.query(ImportedGame)
+                .order_by(ImportedGame.created_at.desc())
+                .limit(500)
+                .all()
+            )
+        finally:
+            session.close()
+    except Exception as error:
+        return {
+            "databaseAvailable": False,
+            "totalGames": 0,
+            "message": f"Could not read analytics database: {type(error).__name__}: {error}",
+            "advice": ["Check the backend DATABASE_URL and redeploy Railway."],
+            "openings": [],
+            "struggles": [],
+            "recentGames": [],
+        }
+
+    player = (player_name or "").strip().lower()
+    opening_stats: dict[str, dict[str, Any]] = {}
+    struggle_stats: dict[str, dict[str, Any]] = {}
+    result_stats = {"wins": 0, "losses": 0, "draws": 0, "unknown": 0}
+
+    for row in rows:
+        opening_key = row.opening_name or "Unknown opening"
+        opening_entry = opening_stats.setdefault(
+            opening_key,
+            {
+                "name": opening_key,
+                "eco": row.opening_eco,
+                "games": 0,
+                "wins": 0,
+                "losses": 0,
+                "draws": 0,
+            },
+        )
+        opening_entry["games"] += 1
+
+        result_bucket = _result_bucket(row, player)
+        result_stats[result_bucket] += 1
+        if result_bucket in {"wins", "losses", "draws"}:
+            opening_entry[result_bucket] += 1
+
+        report = row.report if isinstance(row.report, dict) else {}
+        for struggle in report.get("struggles", []):
+            title = struggle.get("title") or "General issue"
+            entry = struggle_stats.setdefault(
+                title,
+                {
+                    "title": title,
+                    "count": 0,
+                    "examples": [],
+                },
+            )
+            entry["count"] += 1
+            if len(entry["examples"]) < 3:
+                entry["examples"].append(struggle.get("detail") or row.title)
+
+    openings = sorted(
+        opening_stats.values(),
+        key=lambda item: (item["losses"], item["games"]),
+        reverse=True,
+    )[:8]
+    struggles = sorted(
+        struggle_stats.values(),
+        key=lambda item: item["count"],
+        reverse=True,
+    )[:8]
+
+    return {
+        "databaseAvailable": True,
+        "totalGames": len(rows),
+        "message": "Your uploaded games are being remembered.",
+        "playerName": player_name or "",
+        "results": result_stats,
+        "openings": openings,
+        "struggles": struggles,
+        "advice": _advice_from_summary(openings, struggles, result_stats),
+        "recentGames": [
+            {
+                "title": row.title,
+                "white": row.white,
+                "black": row.black,
+                "result": row.result,
+                "opening": row.opening_name or "Unknown opening",
+                "createdAt": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows[:10]
+        ],
+    }
+
+
+def _result_bucket(row: ImportedGame, player: str) -> str:
+    result = row.result or "*"
+    if result == "1/2-1/2":
+        return "draws"
+    if result not in {"1-0", "0-1"}:
+        return "unknown"
+
+    if not player:
+        return "wins" if result == "1-0" else "losses"
+
+    white_name = (row.white or "").lower()
+    black_name = (row.black or "").lower()
+    if player in white_name:
+        return "wins" if result == "1-0" else "losses"
+    if player in black_name:
+        return "wins" if result == "0-1" else "losses"
+    return "unknown"
+
+
+def _advice_from_summary(
+    openings: list[dict[str, Any]],
+    struggles: list[dict[str, Any]],
+    results: dict[str, int],
+) -> list[str]:
+    advice: list[str] = []
+
+    if not openings:
+        return [
+            "Upload a few PGNs first. Once there are enough games, this panel will show patterns instead of one-game guesses."
+        ]
+
+    top_struggle = struggles[0]["title"] if struggles else ""
+    if top_struggle == "Opening memory":
+        advice.append(
+            "Your most repeated issue is leaving known opening lines early. Spend 10 minutes in Learn Openings memory mode before playing ranked games."
+        )
+    elif top_struggle == "Material swing":
+        advice.append(
+            "Material swings are showing up repeatedly. Before every forcing move, pause and ask what your opponent can capture next."
+        )
+    elif top_struggle == "King pressure":
+        advice.append(
+            "Your kings are coming under pressure often. Prioritize development, king safety, and pawn moves that do not open files near your own king."
+        )
+    elif top_struggle.startswith("Stockfish"):
+        advice.append(
+            "Engine mistakes are clustering in your games. Review the first two Stockfish-marked moments after each upload and replay the position twice."
+        )
+
+    worst_opening = openings[0]
+    if worst_opening.get("losses", 0) > 0:
+        advice.append(
+            f"Your toughest repeated opening is {worst_opening['name']}. Build a short response file for the first 8-10 moves and drill it until it is automatic."
+        )
+
+    total_decisive = results.get("wins", 0) + results.get("losses", 0)
+    if total_decisive and results.get("losses", 0) > results.get("wins", 0):
+        advice.append(
+            "Your saved sample has more losses than wins. Focus on one opening repair and one tactical habit instead of trying to fix everything at once."
+        )
+
+    return advice or [
+        "Your saved games do not show one dominant weakness yet. Keep uploading PGNs after sessions so the trend report gets sharper."
+    ]
+
+
+@lru_cache(maxsize=1)
+def _get_session_factory() -> sessionmaker[Session] | None:
+    database_url = _database_url()
+    if not database_url:
+        return None
+
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Base.metadata.create_all(bind=engine)
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def _database_url() -> str | None:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return None
+    if database_url.startswith("postgres://"):
+        return database_url.replace("postgres://", "postgresql+psycopg://", 1)
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return database_url
 
 
 def _game_to_payload(game: chess.pgn.Game, game_number: int) -> dict[str, Any]:
@@ -468,6 +746,8 @@ def _find_stockfish_path() -> str | None:
     candidates = [
         Path("/usr/games/stockfish"),
         Path("/usr/bin/stockfish"),
+        repo_root / "ChessCoach" / "tools" / "win" / "stockfish_13_win_x64_bmi2" / "stockfish_13_win_x64_bmi2.exe",
+        repo_root / "ChessCoach" / "tools" / "deb" / "stockfish_13_linux_x64_bmi2" / "stockfish_13_linux_x64_bmi2",
         repo_root / "Stockfish" / "src" / "stockfish.exe",
         repo_root / "Stockfish" / "src" / "stockfish",
         repo_root / "Stockfish" / "stockfish.exe",
@@ -482,7 +762,11 @@ def _find_stockfish_path() -> str | None:
 def _repo_root() -> Path:
     current = Path(__file__).resolve()
     for parent in current.parents:
-        if (parent / "chess-openings").exists() or (parent / "Stockfish").exists():
+        if (
+            (parent / "chess-openings").exists()
+            or (parent / "Stockfish").exists()
+            or (parent / "ChessCoach").exists()
+        ):
             return parent
         if (parent / "apps" / "api").exists():
             return parent

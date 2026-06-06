@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ChessBoard } from "@/components/ChessBoard";
 import { initialBoard } from "@/components/chessCore";
 
@@ -63,10 +63,49 @@ type UploadResponse = {
   filename: string;
   gameCount: number;
   games: ParsedGame[];
+  library?: {
+    saved: boolean;
+    message: string;
+  };
   engine: {
     stockfishAvailable: boolean;
     message: string;
   };
+};
+
+type AnalyticsSummary = {
+  databaseAvailable: boolean;
+  totalGames: number;
+  message: string;
+  playerName?: string;
+  results?: {
+    wins: number;
+    losses: number;
+    draws: number;
+    unknown: number;
+  };
+  openings: Array<{
+    name: string;
+    eco?: string;
+    games: number;
+    wins: number;
+    losses: number;
+    draws: number;
+  }>;
+  struggles: Array<{
+    title: string;
+    count: number;
+    examples: string[];
+  }>;
+  advice: string[];
+  recentGames: Array<{
+    title: string;
+    white?: string;
+    black?: string;
+    result?: string;
+    opening: string;
+    createdAt?: string | null;
+  }>;
 };
 
 export function ChessWorkbench() {
@@ -76,14 +115,78 @@ export function ChessWorkbench() {
   const [selectedPly, setSelectedPly] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [playerName, setPlayerName] = useState(() =>
+    typeof window === "undefined"
+      ? ""
+      : window.localStorage.getItem("chessAnalyticsPlayerName") ?? "",
+  );
+  const [perspective, setPerspective] = useState<"auto" | "white" | "black">(
+    () => {
+      if (typeof window === "undefined") {
+        return "auto";
+      }
+      const savedPerspective = window.localStorage.getItem(
+        "chessAnalyticsPerspective",
+      );
+      if (
+        savedPerspective === "auto" ||
+        savedPerspective === "white" ||
+        savedPerspective === "black"
+      ) {
+        return savedPerspective;
+      }
+      return "auto";
+    },
+  );
+  const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
 
   const selectedGame = upload?.games[selectedGameIndex] ?? null;
   const selectedPosition = selectedGame?.positions[selectedPly] ?? null;
   const selectedOpening = selectedPosition?.opening ?? selectedGame?.opening ?? null;
+  const boardOrientation = resolveBoardOrientation(
+    selectedGame,
+    playerName,
+    perspective,
+  );
+  const topColor = boardOrientation === "white" ? "black" : "white";
+  const bottomColor = boardOrientation;
   const movePairs = useMemo(
     () => pairMoves(selectedGame?.moves ?? []),
     [selectedGame],
   );
+
+  const refreshAnalytics = useCallback(async (name: string) => {
+    const params = new URLSearchParams();
+    if (name.trim()) {
+      params.set("player_name", name.trim());
+    }
+
+    try {
+      const response = await fetch(`/api/analytics/summary?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as AnalyticsSummary;
+      setAnalytics(payload);
+    } catch {
+      setAnalytics(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("chessAnalyticsPlayerName", playerName);
+  }, [playerName]);
+
+  useEffect(() => {
+    window.localStorage.setItem("chessAnalyticsPerspective", perspective);
+  }, [perspective]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void refreshAnalytics(playerName);
+    }, 300);
+
+    return () => window.clearTimeout(timeout);
+  }, [playerName, refreshAnalytics]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const nextFile = event.target.files?.[0] ?? null;
@@ -118,6 +221,7 @@ export function ChessWorkbench() {
       setUpload(payload);
       setSelectedGameIndex(0);
       setSelectedPly(0);
+      await refreshAnalytics(playerName);
     } catch (uploadError) {
       setError(
         uploadError instanceof Error
@@ -169,8 +273,12 @@ export function ChessWorkbench() {
               <UploadControls
                 file={file}
                 isUploading={isUploading}
+                playerName={playerName}
+                perspective={perspective}
                 onFileChange={handleFileChange}
                 onUpload={handleUpload}
+                onPlayerNameChange={setPlayerName}
+                onPerspectiveChange={setPerspective}
               />
             </div>
           </div>
@@ -183,7 +291,7 @@ export function ChessWorkbench() {
 
           <div className="mx-auto flex w-full max-w-[820px] flex-1 flex-col justify-center">
             <PlayerBar
-              name={selectedGame?.headers.Black ?? "Black"}
+              name={playerNameForColor(selectedGame, topColor)}
               detail={selectedOpening?.name ?? "Upload a PGN to start"}
               clock={selectedGame ? "Review" : "--:--"}
               top
@@ -191,9 +299,10 @@ export function ChessWorkbench() {
             <ChessBoard
               board={selectedPosition?.board ?? initialBoard}
               lastMove={selectedPosition?.lastMove?.uci}
+              orientation={boardOrientation}
             />
             <PlayerBar
-              name={selectedGame?.headers.White ?? "White"}
+              name={playerNameForColor(selectedGame, bottomColor)}
               detail={selectedGame?.result ?? "PGN analysis"}
               clock={selectedGame ? `${selectedPly}/${selectedGame.moves.length}` : "0/0"}
             />
@@ -202,6 +311,7 @@ export function ChessWorkbench() {
 
         <AnalysisPanel
           upload={upload}
+          analytics={analytics}
           selectedGame={selectedGame}
           selectedGameIndex={selectedGameIndex}
           selectedPly={selectedPly}
@@ -256,16 +366,43 @@ function RailLink({
 function UploadControls({
   file,
   isUploading,
+  playerName,
+  perspective,
   onFileChange,
   onUpload,
+  onPlayerNameChange,
+  onPerspectiveChange,
 }: {
   file: File | null;
   isUploading: boolean;
+  playerName: string;
+  perspective: "auto" | "white" | "black";
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onUpload: () => void;
+  onPlayerNameChange: (name: string) => void;
+  onPerspectiveChange: (perspective: "auto" | "white" | "black") => void;
 }) {
   return (
-    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+    <div className="flex w-full flex-col gap-2 sm:w-auto xl:flex-row">
+      <input
+        type="text"
+        value={playerName}
+        onChange={(event) => onPlayerNameChange(event.target.value)}
+        placeholder="Your PGN name"
+        className="min-h-11 bg-[#262421] px-3 text-sm font-bold text-[#efe7d2] outline-none ring-1 ring-white/10 placeholder:text-[#918b82] focus:ring-[#7fa650] sm:w-48"
+      />
+      <select
+        value={perspective}
+        onChange={(event) =>
+          onPerspectiveChange(event.target.value as "auto" | "white" | "black")
+        }
+        className="min-h-11 bg-[#262421] px-3 text-sm font-bold text-[#efe7d2] outline-none ring-1 ring-white/10 focus:ring-[#7fa650]"
+        aria-label="Board perspective"
+      >
+        <option value="auto">Auto color</option>
+        <option value="white">White bottom</option>
+        <option value="black">Black bottom</option>
+      </select>
       <label className="flex min-h-11 w-full cursor-pointer items-center justify-center bg-[#262421] px-4 text-sm font-bold text-[#efe7d2] ring-1 ring-white/10 hover:bg-[#3a3733] sm:w-72">
         <input
           type="file"
@@ -316,6 +453,7 @@ function PlayerBar({
 
 function AnalysisPanel({
   upload,
+  analytics,
   selectedGame,
   selectedGameIndex,
   selectedPly,
@@ -325,6 +463,7 @@ function AnalysisPanel({
   onSelectPly,
 }: {
   upload: UploadResponse | null;
+  analytics: AnalyticsSummary | null;
   selectedGame: ParsedGame | null;
   selectedGameIndex: number;
   selectedPly: number;
@@ -388,6 +527,13 @@ function AnalysisPanel({
         </section>
 
         <section className="mt-4 rounded bg-[#312e2b] p-4">
+          <h3 className="text-sm font-bold uppercase text-[#efe7d2]">
+            Saved Trends
+          </h3>
+          <AnalyticsPanel analytics={analytics} upload={upload} />
+        </section>
+
+        <section className="mt-4 rounded bg-[#312e2b] p-4">
           <h3 className="text-sm font-bold uppercase text-[#efe7d2]">Games</h3>
           <GameList
             upload={upload}
@@ -414,6 +560,107 @@ function AnalysisPanel({
         <ReportPanel game={selectedGame} engineMessage={upload?.engine.message} />
       </div>
     </aside>
+  );
+}
+
+function AnalyticsPanel({
+  analytics,
+  upload,
+}: {
+  analytics: AnalyticsSummary | null;
+  upload: UploadResponse | null;
+}) {
+  if (!analytics) {
+    return <EmptyState label="Trend data is loading" />;
+  }
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div className="rounded bg-[#3a3733] p-3">
+        <p className="text-sm font-bold text-white">
+          {analytics.totalGames} saved game{analytics.totalGames === 1 ? "" : "s"}
+        </p>
+        <p className="mt-1 text-xs leading-5 text-[#c9c4b8]">
+          {upload?.library?.message ?? analytics.message}
+        </p>
+      </div>
+
+      {analytics.results ? (
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <TrendStat label="Wins" value={analytics.results.wins} />
+          <TrendStat label="Losses" value={analytics.results.losses} />
+          <TrendStat label="Draws" value={analytics.results.draws} />
+        </div>
+      ) : null}
+
+      {analytics.openings.length ? (
+        <div>
+          <p className="mb-2 text-xs font-bold uppercase text-[#a5a096]">
+            Tough openings
+          </p>
+          <div className="space-y-2">
+            {analytics.openings.slice(0, 3).map((opening) => (
+              <div key={opening.name} className="rounded bg-[#3a3733] p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="truncate text-sm font-bold text-white">
+                    {opening.eco ? `${opening.eco} ` : ""}
+                    {opening.name}
+                  </p>
+                  <span className="shrink-0 text-xs font-bold text-[#ffb86b]">
+                    {opening.losses} losses
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-[#c9c4b8]">
+                  {opening.games} games saved in this line
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {analytics.struggles.length ? (
+        <div>
+          <p className="mb-2 text-xs font-bold uppercase text-[#a5a096]">
+            Repeated issues
+          </p>
+          <div className="space-y-2">
+            {analytics.struggles.slice(0, 3).map((struggle) => (
+              <div key={struggle.title} className="rounded bg-[#3a3733] p-3">
+                <p className="text-sm font-bold text-white">
+                  {struggle.title} ({struggle.count})
+                </p>
+                <p className="mt-1 text-xs leading-5 text-[#c9c4b8]">
+                  {struggle.examples[0]}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div>
+        <p className="mb-2 text-xs font-bold uppercase text-[#a5a096]">
+          Coach advice
+        </p>
+        <ul className="space-y-2">
+          {analytics.advice.map((item) => (
+            <li key={item} className="rounded bg-[#435d32] p-3 text-sm leading-6 text-white">
+              {item}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function TrendStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded bg-[#3a3733] px-2 py-3">
+      <p className="text-lg font-bold text-white">{value}</p>
+      <p className="text-xs font-bold uppercase text-[#a5a096]">{label}</p>
+    </div>
   );
 }
 
@@ -604,4 +851,42 @@ function pairMoves(moves: Move[]) {
   }
 
   return pairs;
+}
+
+function resolveBoardOrientation(
+  game: ParsedGame | null,
+  playerName: string,
+  perspective: "auto" | "white" | "black",
+): "white" | "black" {
+  if (perspective === "white" || perspective === "black") {
+    return perspective;
+  }
+
+  const normalizedName = playerName.trim().toLowerCase();
+  if (!game || !normalizedName) {
+    return "white";
+  }
+
+  const whiteName = (game.headers.White ?? "").toLowerCase();
+  const blackName = (game.headers.Black ?? "").toLowerCase();
+
+  if (blackName.includes(normalizedName)) {
+    return "black";
+  }
+
+  if (whiteName.includes(normalizedName)) {
+    return "white";
+  }
+
+  return "white";
+}
+
+function playerNameForColor(game: ParsedGame | null, color: "white" | "black") {
+  if (!game) {
+    return color === "white" ? "White" : "Black";
+  }
+
+  return color === "white"
+    ? game.headers.White ?? "White"
+    : game.headers.Black ?? "Black";
 }

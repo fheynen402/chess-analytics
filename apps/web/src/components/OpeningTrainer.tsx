@@ -146,6 +146,7 @@ export function OpeningTrainer() {
                 lastMove={lastMove}
                 selectedSquare={selectedSquare}
                 hintSquares={hintSquares}
+                orientation="black"
                 onSquareClick={handleSquareClick}
               />
               <PlayerBar name="You play Black" clock={phase === "guided" ? "Coach" : "Memory"} />
