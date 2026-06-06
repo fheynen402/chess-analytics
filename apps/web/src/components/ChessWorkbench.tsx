@@ -213,8 +213,7 @@ export function ChessWorkbench() {
       });
 
       if (!response.ok) {
-        const payload = await response.json().catch(() => null);
-        throw new Error(payload?.detail ?? "The PGN upload failed.");
+        throw new Error(await responseErrorMessage(response));
       }
 
       const payload = (await response.json()) as UploadResponse;
@@ -835,6 +834,19 @@ function EmptyState({ label }: { label: string }) {
       {label}
     </div>
   );
+}
+
+async function responseErrorMessage(response: Response) {
+  const fallback = `The PGN upload failed with status ${response.status}.`;
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    const payload = await response.json().catch(() => null);
+    return payload?.detail ?? payload?.message ?? fallback;
+  }
+
+  const text = await response.text().catch(() => "");
+  return text.trim() || fallback;
 }
 
 function pairMoves(moves: Move[]) {

@@ -33,7 +33,7 @@ app.add_middleware(
 )
 
 
-APP_VERSION = "analytics-library-2026-06-06"
+APP_VERSION = "database-guard-2026-06-06"
 Base = declarative_base()
 SessionLocal: sessionmaker[Session] | None = None
 
@@ -159,7 +159,17 @@ def _parse_pgn(text: str) -> list[dict[str, Any]]:
 
 
 def _store_games(filename: str, pgn_text: str, games: list[dict[str, Any]]) -> dict[str, Any]:
-    session_factory = _get_session_factory()
+    try:
+        session_factory = _get_session_factory()
+    except Exception as error:
+        return {
+            "saved": False,
+            "message": (
+                "Upload analyzed, but database setup failed: "
+                f"{type(error).__name__}: {error}"
+            ),
+        }
+
     if session_factory is None:
         return {
             "saved": False,
@@ -207,7 +217,19 @@ def _imported_game_row(filename: str, pgn_text: str, game: dict[str, Any]) -> Im
 
 
 def _analytics_summary(player_name: str | None = None) -> dict[str, Any]:
-    session_factory = _get_session_factory()
+    try:
+        session_factory = _get_session_factory()
+    except Exception as error:
+        return {
+            "databaseAvailable": False,
+            "totalGames": 0,
+            "message": f"Could not prepare analytics database: {type(error).__name__}: {error}",
+            "advice": ["Check the backend DATABASE_URL in Railway, then redeploy the API."],
+            "openings": [],
+            "struggles": [],
+            "recentGames": [],
+        }
+
     if session_factory is None:
         return {
             "databaseAvailable": False,
