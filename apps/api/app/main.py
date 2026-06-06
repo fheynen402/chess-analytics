@@ -31,6 +31,8 @@ app.add_middleware(
 )
 
 
+APP_VERSION = "upload-path-fix-2026-06-06"
+
 PIECE_VALUES = {
     chess.PAWN: 1,
     chess.KNIGHT: 3,
@@ -59,17 +61,25 @@ class Opening:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 @app.get("/engine/status")
 def engine_status():
-    stockfish_path = _find_stockfish_path()
-    return {
-        "stockfishAvailable": stockfish_path is not None,
-        "stockfishPath": stockfish_path,
-        "openingCount": len(_load_opening_book()),
-    }
+    try:
+        stockfish_path = _find_stockfish_path()
+        opening_count = len(_load_opening_book())
+        return {
+            "version": APP_VERSION,
+            "stockfishAvailable": stockfish_path is not None,
+            "stockfishPath": stockfish_path,
+            "openingCount": opening_count,
+        }
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Engine status failed: {type(error).__name__}: {error}",
+        ) from error
 
 
 @app.post("/games/upload")
@@ -83,7 +93,13 @@ async def upload_games(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="The uploaded PGN file is empty.")
 
     text = raw.decode("utf-8", errors="replace")
-    games = _parse_pgn(text)
+    try:
+        games = _parse_pgn(text)
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"PGN parsing failed: {type(error).__name__}: {error}",
+        ) from error
     if not games:
         raise HTTPException(status_code=400, detail="No chess games were found in that PGN.")
 
